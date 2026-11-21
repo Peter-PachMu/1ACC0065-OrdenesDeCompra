@@ -18,7 +18,7 @@ import (
 	"time"
 )
 
-const NF = 23 // cantidad de variables; debe ser igual que en el cargador
+const NF = 24 // cantidad de variables; debe ser igual que en el cargador
 
 // Un conjunto de datos (train, validación o test).
 type Conjunto struct {
@@ -78,24 +78,30 @@ func cargar(ruta string) (train, val, test *Conjunto) {
 	return
 }
 
-// Estandariza solo las variables continuas 
-// usando la media y la desviación del conjunto de entrenamiento.
-func estandarizar(train, val, test *Conjunto) (media, desv [2]float64) {
-	for j := 0; j < 2; j++ {
+// Columnas continuas que se estandarizan: x0 (log del monto), x1 (largo de la descripción)
+// y x23 (tasa histórica de anulación de la entidad).
+var columnasContinuas = []int{0, 1, 23}
+
+// Estandariza esas columnas usando la media y la desviación del conjunto de entrenamiento.
+// Devuelve la media y la desviación porque la API las necesitará para preparar los datos igual.
+func estandarizar(train, val, test *Conjunto) (media, desv []float64) {
+	media = make([]float64, len(columnasContinuas))
+	desv = make([]float64, len(columnasContinuas))
+	for k, j := range columnasContinuas {
 		suma, sumaCuad := 0.0, 0.0
 		for i := 0; i < train.N; i++ {
 			v := train.X[i*NF+j]
 			suma += v
 			sumaCuad += v * v
 		}
-		media[j] = suma / float64(train.N)
-		desv[j] = math.Sqrt(sumaCuad/float64(train.N) - media[j]*media[j])
-		if desv[j] == 0 {
-			desv[j] = 1
+		media[k] = suma / float64(train.N)
+		desv[k] = math.Sqrt(sumaCuad/float64(train.N) - media[k]*media[k])
+		if desv[k] == 0 {
+			desv[k] = 1
 		}
 		for _, c := range []*Conjunto{train, val, test} {
 			for i := 0; i < c.N; i++ {
-				c.X[i*NF+j] = (c.X[i*NF+j] - media[j]) / desv[j]
+				c.X[i*NF+j] = (c.X[i*NF+j] - media[k]) / desv[k]
 			}
 		}
 	}
@@ -274,7 +280,7 @@ func main() {
 	train, val, test := cargar(*datos)
 	fmt.Printf("datos cargados en %.1f s | train %d | validación %d | test %d\n",
 		time.Since(inicio).Seconds(), train.N, val.N, test.N)
-	estandarizar(train, val, test)
+	media, desv := estandarizar(train, val, test)
 
 	// Peso de la clase positiva = cantidad de no anuladas / cantidad de anuladas
 	positivos := 0.0
@@ -316,6 +322,13 @@ func main() {
 	if err == nil {
 		for j, v := range w {
 			fmt.Fprintf(f, "w%d=%g\n", j, v)
+		}
+		// la API lo necesita para convertir el puntaje en una probabilidad realista
+		fmt.Fprintf(f, "peso_pos=%g\n", pesoPos)
+		// la API necesita estos valores para preparar los datos igual que en el entrenamiento
+		for k, j := range columnasContinuas {
+			fmt.Fprintf(f, "media_x%d=%g\n", j, media[k])
+			fmt.Fprintf(f, "desv_x%d=%g\n", j, desv[k])
 		}
 		f.Close()
 		fmt.Println("pesos guardados en modelo.txt")

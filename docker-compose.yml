@@ -1,0 +1,68 @@
+services:
+  mongo:
+    image: mongo:7
+    volumes:
+      - mongo_datos:/data/db
+
+  redis:
+    image: redis:7-alpine
+
+  nodo1:
+    build:
+      context: .
+      args: { SERVICIO: nodo }
+    environment:
+      NODO_ID: "0"
+      TOTAL_NODOS: "3"
+      PUERTO: "9001"
+      DATASET: /datos/dataset_limpio.csv
+    volumes:
+      - ./dataset_limpio.csv:/datos/dataset_limpio.csv:ro
+
+  nodo2:
+    build:
+      context: .
+      args: { SERVICIO: nodo }
+    environment:
+      NODO_ID: "1"
+      TOTAL_NODOS: "3"
+      PUERTO: "9001"
+      DATASET: /datos/dataset_limpio.csv
+    volumes:
+      - ./dataset_limpio.csv:/datos/dataset_limpio.csv:ro
+
+  nodo3:
+    build:
+      context: .
+      args: { SERVICIO: nodo }
+    environment:
+      NODO_ID: "2"
+      TOTAL_NODOS: "3"
+      PUERTO: "9001"
+      DATASET: /datos/dataset_limpio.csv
+    volumes:
+      - ./dataset_limpio.csv:/datos/dataset_limpio.csv:ro
+
+  api:
+    build:
+      context: .
+      args: { SERVICIO: api }
+    ports:
+      - "8080:8080"
+    environment:
+      PUERTO: "8080"
+      MONGO_URI: mongodb://mongo:27017
+      REDIS_ADDR: redis:6379
+      NODOS: nodo1:9001,nodo2:9001,nodo3:9001
+      MODELO: /datos/modelo.txt
+    volumes:
+      - ./modelo.txt:/datos/modelo.txt:ro
+    depends_on:
+      - mongo
+      - redis
+      - nodo1
+      - nodo2
+      - nodo3
+
+volumes:
+  mongo_datos:

@@ -1,0 +1,108 @@
+{
+  "info": {
+    "name": "API Riesgo en Compras Públicas",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [{ "key": "base", "value": "http://localhost:8080" }],
+  "item": [
+    {
+      "name": "1. Health",
+      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+        "pm.test('Estado 200', function () { pm.response.to.have.status(200); });",
+        "pm.test('Responde en menos de 100 ms', function () { pm.expect(pm.response.responseTime).to.be.below(100); });"
+      ] } }],
+      "request": { "method": "GET", "url": { "raw": "{{base}}/health", "host": ["{{base}}"], "path": ["health"] } }
+    },
+    {
+      "name": "2. Predecir - riesgo alto (educación, catálogo)",
+      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+        "pm.test('Estado 200', function () { pm.response.to.have.status(200); });",
+        "pm.test('Responde en menos de 100 ms', function () { pm.expect(pm.response.responseTime).to.be.below(100); });",
+        "pm.test('Trae probabilidad y nivel de riesgo', function () {",
+        "  var r = pm.response.json();",
+        "  pm.expect(r.probabilidad).to.be.within(0, 1);",
+        "  pm.expect(['BAJO','MEDIO','ALTO']).to.include(r.nivel_riesgo);",
+        "});"
+      ] } }],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"monto\": 3500,\n  \"largo_descripcion\": 60,\n  \"fin_de_mes\": false,\n  \"persona_juridica\": true,\n  \"objeto\": \"BIENES\",\n  \"tipo_contratacion\": \"CATALOGO\",\n  \"sector\": \"EDUCACION\",\n  \"tasa_historica_entidad\": 0.08\n}" },
+        "url": { "raw": "{{base}}/api/predecir", "host": ["{{base}}"], "path": ["api", "predecir"] }
+      }
+    },
+    {
+      "name": "3. Predecir - riesgo bajo (municipal, servicio, persona natural)",
+      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+        "pm.test('Estado 200', function () { pm.response.to.have.status(200); });",
+        "pm.test('Responde en menos de 100 ms', function () { pm.expect(pm.response.responseTime).to.be.below(100); });"
+      ] } }],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"monto\": 1200,\n  \"largo_descripcion\": 140,\n  \"fin_de_mes\": false,\n  \"persona_juridica\": false,\n  \"objeto\": \"SERVICIOS\",\n  \"tipo_contratacion\": \"HASTA_8_UIT\",\n  \"sector\": \"MUNICIPAL\",\n  \"tasa_historica_entidad\": 0.005\n}" },
+        "url": { "raw": "{{base}}/api/predecir", "host": ["{{base}}"], "path": ["api", "predecir"] }
+      }
+    },
+    {
+      "name": "4. Predecir - repetir la consulta 2 (debe venir de la caché)",
+      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+        "pm.test('Responde en menos de 100 ms', function () { pm.expect(pm.response.responseTime).to.be.below(100); });"
+      ] } }],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"monto\": 3500,\n  \"largo_descripcion\": 60,\n  \"fin_de_mes\": false,\n  \"persona_juridica\": true,\n  \"objeto\": \"BIENES\",\n  \"tipo_contratacion\": \"CATALOGO\",\n  \"sector\": \"EDUCACION\",\n  \"tasa_historica_entidad\": 0.08\n}" },
+        "url": { "raw": "{{base}}/api/predecir", "host": ["{{base}}"], "path": ["api", "predecir"] }
+      }
+    },
+    {
+      "name": "5. Predecir - datos inválidos (debe dar 400)",
+      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+        "pm.test('Estado 400', function () { pm.response.to.have.status(400); });"
+      ] } }],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"monto\": -5,\n  \"largo_descripcion\": 60,\n  \"objeto\": \"BIENES\",\n  \"tipo_contratacion\": \"CATALOGO\",\n  \"sector\": \"EDUCACION\",\n  \"tasa_historica_entidad\": 0.08\n}" },
+        "url": { "raw": "{{base}}/api/predecir", "host": ["{{base}}"], "path": ["api", "predecir"] }
+      }
+    },
+    {
+      "name": "6. Nodos del cluster",
+      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+        "pm.test('Estado 200', function () { pm.response.to.have.status(200); });",
+        "pm.test('Todos los nodos activos', function () { pm.response.json().forEach(function (n) { pm.expect(n.activo).to.eql(true); }); });"
+      ] } }],
+      "request": { "method": "GET", "url": { "raw": "{{base}}/api/nodos", "host": ["{{base}}"], "path": ["api", "nodos"] } }
+    },
+    {
+      "name": "7. Entrenar (100 iteraciones)",
+      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+        "pm.test('Estado 202', function () { pm.response.to.have.status(202); });"
+      ] } }],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"iteraciones\": 100,\n  \"lr\": 0.5,\n  \"lambda\": 0.00001\n}" },
+        "url": { "raw": "{{base}}/api/entrenar", "host": ["{{base}}"], "path": ["api", "entrenar"] }
+      }
+    },
+    {
+      "name": "8. Estado del entrenamiento",
+      "request": { "method": "GET", "url": { "raw": "{{base}}/api/entrenar/estado", "host": ["{{base}}"], "path": ["api", "entrenar", "estado"] } }
+    },
+    {
+      "name": "9. Historial de entrenamientos (MongoDB)",
+      "request": { "method": "GET", "url": { "raw": "{{base}}/api/entrenamientos", "host": ["{{base}}"], "path": ["api", "entrenamientos"] } }
+    },
+    {
+      "name": "10. Últimas predicciones (MongoDB)",
+      "request": { "method": "GET", "url": { "raw": "{{base}}/api/predicciones", "host": ["{{base}}"], "path": ["api", "predicciones"] } }
+    },
+    {
+      "name": "11. Métricas y latencia",
+      "request": { "method": "GET", "url": { "raw": "{{base}}/api/metricas", "host": ["{{base}}"], "path": ["api", "metricas"] } }
+    }
+  ]
+}
