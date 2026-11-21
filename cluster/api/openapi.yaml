@@ -1,0 +1,243 @@
+openapi: 3.0.3
+info:
+  title: API de Predicción de Riesgo en Compras Públicas
+  description: |
+    Estima la probabilidad de que una orden de compra o de servicio del Estado sea anulada.
+    La API también coordina un cluster de nodos de Machine Learning (regresión logística distribuida)
+    y guarda el historial en MongoDB, con una caché en Redis.
+  version: "1.0.0"
+servers:
+  - url: http://localhost:8080
+    description: Servidor local (Docker Compose)
+tags:
+  - name: Predicción
+  - name: Cluster
+  - name: Historial
+paths:
+  /health:
+    get:
+      summary: Estado del servicio
+      responses:
+        "200":
+          description: El servicio está activo
+          content:
+            application/json:
+              example:
+                estado: ok
+                modelo_cargado: true
+  /api/predecir:
+    post:
+      tags: [Predicción]
+      summary: Probabilidad de anulación de una orden
+      description: Responde en pocos milisegundos. Las consultas repetidas se sirven desde la caché de Redis.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EntradaPrediccion"
+            example:
+              monto: 3500
+              largo_descripcion: 60
+              fin_de_mes: false
+              persona_juridica: true
+              objeto: BIENES
+              tipo_contratacion: CATALOGO
+              sector: EDUCACION
+              tasa_historica_entidad: 0.05
+      responses:
+        "200":
+          description: Predicción calculada
+          headers:
+            X-Tiempo-ms:
+              description: Tiempo que tardó la API en calcular la respuesta
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RespuestaPrediccion"
+        "400":
+          description: Datos inválidos
+          content:
+            application/json:
+              example:
+                error: "monto debe ser mayor que 0"
+        "503":
+          description: Todavía no hay un modelo cargado
+  /api/entrenar:
+    post:
+      tags: [Cluster]
+      summary: Entrena el modelo repartiendo el cálculo entre los nodos
+      description: El entrenamiento corre en segundo plano. Consulta el avance en /api/entrenar/estado.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PedidoEntrenamiento"
+            example:
+              iteraciones: 100
+              lr: 0.5
+              lambda: 0.00001
+      responses:
+        "202":
+          description: Entrenamiento iniciado
+          content:
+            application/json:
+              example:
+                id: "20261120-153000"
+                mensaje: "entrenamiento iniciado; consulta /api/entrenar/estado"
+        "409":
+          description: Ya hay un entrenamiento en curso
+  /api/entrenar/estado:
+    get:
+      tags: [Cluster]
+      summary: Progreso del entrenamiento en curso
+      responses:
+        "200":
+          description: Estado actual
+          content:
+            application/json:
+              example:
+                corriendo: true
+                id: "20261120-153000"
+                iteracion: 40
+                total_iteraciones: 100
+                perdida: 0.6521
+                mensaje: iniciando
+  /api/nodos:
+    get:
+      tags: [Cluster]
+      summary: Estado de los nodos del cluster
+      description: Hace un ping TCP a cada nodo y mide su tiempo de respuesta.
+      responses:
+        "200":
+          description: Lista de nodos
+          content:
+            application/json:
+              example:
+                - direccion: "nodo1:9001"
+                  activo: true
+                  latencia_ms: 1.8
+                  muestras_train: 1019078
+                  revisado: "2026-11-20T15:30:00Z"
+  /api/entrenamientos:
+    get:
+      tags: [Historial]
+      summary: Últimos 10 entrenamientos guardados en MongoDB
+      responses:
+        "200":
+          description: Lista de entrenamientos
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Entrenamiento"
+        "503":
+          description: MongoDB no está disponible
+  /api/predicciones:
+    get:
+      tags: [Historial]
+      summary: Últimas 20 predicciones guardadas en MongoDB
+      responses:
+        "200":
+          description: Lista de predicciones
+        "503":
+          description: MongoDB no está disponible
+  /api/metricas:
+    get:
+      tags: [Historial]
+      summary: Latencia de las predicciones y último entrenamiento
+      responses:
+        "200":
+          description: Métricas del servicio
+          content:
+            application/json:
+              example:
+                latencia_prediccion:
+                  muestras: 120
+                  promedio_ms: 0.4
+                  p50_ms: 0.3
+                  p95_ms: 0.9
+                  max_ms: 2.1
+                modelo_cargado: true
+components:
+  schemas:
+    EntradaPrediccion:
+      type: object
+      required: [monto, largo_descripcion, objeto, tipo_contratacion, sector, tasa_historica_entidad]
+      properties:
+        monto:
+          type: number
+          description: Monto de la orden en soles (mayor que 0)
+        largo_descripcion:
+          type: integer
+          description: Cantidad de caracteres de la descripción de la orden
+        fin_de_mes:
+          type: boolean
+          description: La orden se emite en los últimos días del mes
+        persona_juridica:
+          type: boolean
+          description: El contratista es persona jurídica (RUC que empieza con 20)
+        objeto:
+          type: string
+          enum: [BIENES, SERVICIOS, CONSULTORIA_OBRAS]
+        tipo_contratacion:
+          type: string
+          enum: [HASTA_8_UIT, SIN_PROCESO, PROCESO_SELECCION, EXONERACION, CATALOGO, REGIMEN_ESPECIAL, CONVENIO, SERVICIO_PUBLICO, DECRETO_URGENCIA]
+        sector:
+          type: string
+          enum: [SALUD, EDUCACION, MUNICIPAL, GOBIERNO_REGIONAL, SEGURIDAD_JUSTICIA, SANEAMIENTO, OTRO]
+        tasa_historica_entidad:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Proporción de órdenes anuladas que tuvo la entidad en meses anteriores
+    RespuestaPrediccion:
+      type: object
+      properties:
+        probabilidad:
+          type: number
+          description: Probabilidad estimada de que la orden sea anulada
+        nivel_riesgo:
+          type: string
+          enum: [BAJO, MEDIO, ALTO]
+        desde_cache:
+          type: boolean
+        tiempo_ms:
+          type: number
+    PedidoEntrenamiento:
+      type: object
+      properties:
+        iteraciones:
+          type: integer
+          minimum: 1
+          maximum: 1000
+          default: 100
+        lr:
+          type: number
+          default: 0.5
+        lambda:
+          type: number
+          default: 0.00001
+    Entrenamiento:
+      type: object
+      properties:
+        id:
+          type: string
+        estado:
+          type: string
+        nodos:
+          type: integer
+        iteraciones:
+          type: integer
+        auc_pr_val:
+          type: number
+        auc_pr_test:
+          type: number
+        lift_top5_test:
+          type: number
+        segundos:
+          type: number

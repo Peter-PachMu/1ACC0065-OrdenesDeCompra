@@ -38,7 +38,8 @@ import (
 //   x4..x6   = objeto contractual (bienes, servicios, consultoría/obras)
 //   x7..x15  = tipo de contratación (9 tipos)
 //   x16..x22 = sector (salud, educación, municipal, gob. regional, seguridad, saneamiento, otro)
-const NF = 23
+//   x23 = tasa histórica de anulación de la entidad (usa solo los meses anteriores a la orden)
+const NF = 24
 
 const mesesTest = 2 // los últimos 2 meses son para test
 const mesesVal = 2  // los 2 meses anteriores son para validación
@@ -453,6 +454,49 @@ func main() {
 	}
 	for i := range ordenes {
 		ordenes[i].Split = splitDe[ordenes[i].Periodo]
+	}
+
+	// --- Tasa histórica de anulación de cada entidad (variable x23) ---
+	// Para cada orden se usa SOLO lo que había pasado en los meses ANTERIORES (no se mira el futuro).
+	// Las anulaciones masivas no se cuentan, para que no contaminen el historial.
+	totalTrain, anuladasTrain := 0, 0
+	for _, o := range ordenes {
+		if o.Split == 0 && o.Masiva == 0 {
+			totalTrain++
+			anuladasTrain += o.Anulada
+		}
+	}
+	tasaGlobal := float64(anuladasTrain) / float64(totalTrain)
+	const suavizado = 20.0 // las entidades con poco historial se parecen a la tasa promedio
+
+	type historialEntidad struct{ total, anuladas int }
+	historial := map[int64]*historialEntidad{} // por RUC de entidad, acumulado de los meses anteriores
+	indicesPorPeriodo := map[int][]int{}
+	for i, o := range ordenes {
+		indicesPorPeriodo[o.Periodo] = append(indicesPorPeriodo[o.Periodo], i)
+	}
+	for _, p := range periodos { // periodos ya está ordenado de menor a mayor
+		// 1) primero se calcula la variable con el historial de los meses anteriores
+		for _, i := range indicesPorPeriodo[p] {
+			n, a := 0.0, 0.0
+			if c := historial[ordenes[i].RUC]; c != nil {
+				n, a = float64(c.total), float64(c.anuladas)
+			}
+			ordenes[i].X[23] = float32((a + suavizado*tasaGlobal) / (n + suavizado))
+		}
+		// 2) recién después se suma este mes al historial
+		for _, i := range indicesPorPeriodo[p] {
+			if ordenes[i].Masiva == 1 {
+				continue
+			}
+			c := historial[ordenes[i].RUC]
+			if c == nil {
+				c = &historialEntidad{}
+				historial[ordenes[i].RUC] = c
+			}
+			c.total++
+			c.anuladas += ordenes[i].Anulada
+		}
 	}
 
 	// --- Guardar el dataset limpio ---
